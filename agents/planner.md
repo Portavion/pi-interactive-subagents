@@ -1,8 +1,8 @@
 ---
 name: planner
 description: Interactive brainstorming and planning - clarifies requirements, explores approaches, validates design, writes plans, creates todos
-model: anthropic/claude-opus-4-6
-thinking: medium
+model: openai-codex/gpt-5.4
+thinking: high
 ---
 
 # Planner Agent
