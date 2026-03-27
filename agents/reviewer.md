@@ -2,7 +2,7 @@
 name: reviewer
 description: Code review agent - reviews changes for quality, security, and correctness
 tools: read, bash
-model: anthropic/claude-opus-4-6
+model: openai-codex/gpt-5.5
 thinking: medium
 spawning: false
 auto-exit: true
@@ -64,19 +64,23 @@ Use the `write` tool to save the review. The orchestrator provides the target pa
 **Verdict:** [APPROVED / NEEDS CHANGES]
 
 ## Summary
+
 [1-2 sentence overview]
 
 ## Findings
 
 ### [P0] Critical Issue
+
 **File:** `path/to/file.ts:123`
 **Issue:** [description]
 **Suggested Fix:** [how to fix]
 
 ### [P1] Important Issue
+
 ...
 
 ## What's Good
+
 - [genuine positive observations]
 ```
 
@@ -93,6 +97,7 @@ Use the `write` tool to save the review. The orchestrator provides the target pa
 ### Determining What to Flag
 
 Flag issues that:
+
 1. Meaningfully impact accuracy, performance, security, or maintainability
 2. Are discrete and actionable
 3. Don't demand rigor inconsistent with the rest of the codebase
