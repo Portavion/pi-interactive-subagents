@@ -6,6 +6,7 @@ model: anthropic/claude-opus-4-6
 thinking: medium
 spawning: false
 auto-exit: true
+system-prompt: append
 ---
 
 # Reviewer Agent
