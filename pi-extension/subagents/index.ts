@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import {
   isMuxAvailable,
   muxSetupHint,
@@ -177,6 +178,23 @@ function formatElapsed(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return `${m}m ${s}s`;
+}
+
+function getSessionTitleIssuePrefix(): string {
+  try {
+    const branch = execFileSync("git", ["branch", "--show-current"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+    }).trim();
+    const match = branch.match(/^(\d+)-/);
+    return match ? `#${match[1]}` : "xxxx";
+  } catch {
+    return "xxxx";
+  }
+}
+
+function prefixSessionTitle(title: string): string {
+  return `${getSessionTitleIssuePrefix()} ${title}`;
 }
 
 function muxUnavailableResult(kind: "subagents" | "tab-title" = "subagents") {
@@ -1066,11 +1084,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           return muxUnavailableResult("tab-title");
         }
         try {
-          renameCurrentTab(params.title);
-          renameWorkspace(params.title);
+          const prefixedTitle = prefixSessionTitle(params.title);
+          renameCurrentTab(prefixedTitle);
+          renameWorkspace(prefixedTitle);
           return {
-            content: [{ type: "text", text: `Title set to: ${params.title}` }],
-            details: { title: params.title },
+            content: [{ type: "text", text: `Title set to: ${prefixedTitle}` }],
+            details: { title: prefixedTitle },
           };
         } catch (err: any) {
           return {
