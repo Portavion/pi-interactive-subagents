@@ -193,8 +193,24 @@ function getSessionTitleIssuePrefix(): string {
   }
 }
 
+function getGitRepoRoot(cwd: string): string | null {
+  try {
+    return execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
 function prefixSessionTitle(title: string): string {
   return `${getSessionTitleIssuePrefix()} ${title}`;
+}
+
+function getSessionIssueNumber(): string | null {
+  const prefix = getSessionTitleIssuePrefix();
+  const match = prefix.match(/^#(\d+)$/);
+  return match ? match[1] : null;
 }
 
 function muxUnavailableResult(kind: "subagents" | "tab-title" = "subagents") {
@@ -220,10 +236,14 @@ function muxUnavailableResult(kind: "subagents" | "tab-title" = "subagents") {
 
 /**
  * Build the artifact directory path for the current session.
- * Same convention as the write_artifact tool:
+ * In git repos this matches write_artifact:
+ *   <repo>/.pi/artifacts/<session-id>/
+ * Fallback:
  *   <sessionDir>/artifacts/<session-id>/
  */
-function getArtifactDir(sessionDir: string, sessionId: string): string {
+function getArtifactDir(sessionDir: string, sessionId: string, cwd: string): string {
+  const repoRoot = getGitRepoRoot(cwd);
+  if (repoRoot) return join(repoRoot, ".pi", "artifacts", sessionId);
   return join(sessionDir, "artifacts", sessionId);
 }
 
@@ -439,10 +459,14 @@ async function launchSubagent(
   const sessionFile = ctx.sessionManager.getSessionFile();
   if (!sessionFile) throw new Error("No session file");
   const sessionId = ctx.sessionManager.getSessionId();
-  const artifactDir = getArtifactDir(ctx.sessionManager.getSessionDir(), sessionId);
 
   const { effectiveCwd, localAgentDir, effectiveAgentDir } = resolveSubagentPaths(params, agentDefs);
   const targetCwdForSession = effectiveCwd ?? ctx.cwd;
+  const artifactDir = getArtifactDir(
+    ctx.sessionManager.getSessionDir(),
+    sessionId,
+    targetCwdForSession,
+  );
   const sessionDir = getDefaultSessionDirFor(targetCwdForSession, effectiveAgentDir);
 
   // Generate a deterministic session file path for this subagent.
@@ -455,7 +479,11 @@ async function launchSubagent(
     Math.random().toString(16).slice(2, 10),
     Math.random().toString(16).slice(2, 6),
   ].join("-");
-  const subagentSessionFile = join(sessionDir, `${timestamp}_${uuid}.jsonl`);
+  const issueNumber = getSessionIssueNumber();
+  const sessionFilename = issueNumber
+    ? `${issueNumber}_${timestamp}_${uuid}.jsonl`
+    : `${timestamp}_${uuid}.jsonl`;
+  const subagentSessionFile = join(sessionDir, sessionFilename);
 
   // Use pre-created surface (parallel mode) or create a new one.
   // For new surfaces, pause briefly so the shell is ready before sending the command.
@@ -1188,7 +1216,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         parts.push("-e", shellEscape(subagentDonePath));
 
         const sessionId = ctx.sessionManager.getSessionId();
-        const artifactDir = getArtifactDir(ctx.sessionManager.getSessionDir(), sessionId);
+        const artifactDir = getArtifactDir(ctx.sessionManager.getSessionDir(), sessionId, ctx.cwd);
 
         let resumeMsgFile: string | undefined;
         if (params.message) {
@@ -1484,8 +1512,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
       if (isMuxAvailable()) {
         try {
           const label = task.length > 40 ? task.slice(0, 40) + "..." : task;
-          renameWorkspace(`🎯 ${label}`);
-          renameCurrentTab(`🎯 Plan: ${label}`);
+          const planningTitle = prefixSessionTitle(`🎯 Plan: ${label}`);
+          renameWorkspace(planningTitle);
+          renameCurrentTab(planningTitle);
         } catch {
           // non-critical -- do not block the plan
         }

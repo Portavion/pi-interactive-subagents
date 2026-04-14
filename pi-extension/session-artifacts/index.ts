@@ -3,9 +3,33 @@ import { highlightCode, getLanguageFromPath, keyHint } from "@mariozechner/pi-co
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 
 const PREVIEW_LINES = 10;
+
+function getGitRepoRoot(cwd: string): string | null {
+  try {
+    return execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function getProjectArtifactsDir(sessionDir: string, cwd: string): string {
+  const repoRoot = getGitRepoRoot(cwd);
+  if (repoRoot) return join(repoRoot, ".pi", "artifacts");
+  return join(sessionDir, "artifacts");
+}
+
+function getArtifactSearchDirs(sessionDir: string, cwd: string): string[] {
+  const preferredDir = getProjectArtifactsDir(sessionDir, cwd);
+  const legacyDir = join(sessionDir, "artifacts");
+  if (preferredDir === legacyDir) return [preferredDir];
+  return [preferredDir, legacyDir];
+}
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
@@ -13,11 +37,11 @@ export default function (pi: ExtensionAPI) {
     label: "Write Artifact",
     description:
       "Write a session-scoped artifact file (plan, context, research, notes, etc.). " +
-      "Files are stored under <sessionDir>/artifacts/<session-id>/. " +
+      "In git repos files are stored under <repo>/.pi/artifacts/<session-id>/ (fallback: <sessionDir>/artifacts/<session-id>/). " +
       "Use this instead of writing pi working files directly.",
     promptSnippet:
       "Write a session-scoped artifact file (plan, context, research, notes, etc.). " +
-      "Files are stored under <sessionDir>/artifacts/<session-id>/. " +
+      "In git repos files are stored under <repo>/.pi/artifacts/<session-id>/ (fallback: <sessionDir>/artifacts/<session-id>/). " +
       "Use this instead of writing pi working files directly.",
     promptGuidelines: [
       "Use write_artifact for any pi working file: plans, scout context, research notes, reviews, or other session artifacts.",
@@ -69,7 +93,9 @@ export default function (pi: ExtensionAPI) {
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const sessionDir = ctx.sessionManager.getSessionDir();
       const sessionId = ctx.sessionManager.getSessionId();
-      const artifactDir = join(sessionDir, "artifacts", sessionId);
+      const cwd = ctx.cwd ?? process.cwd();
+      const projectArtifactsDir = getProjectArtifactsDir(sessionDir, cwd);
+      const artifactDir = join(projectArtifactsDir, sessionId);
       const filePath = resolve(artifactDir, params.name);
 
       // Safety: ensure we're not escaping the artifact directory
@@ -130,11 +156,11 @@ export default function (pi: ExtensionAPI) {
     label: "Read Artifact",
     description:
       "Read a session-scoped artifact file by name (e.g. 'plans/my-plan.md', 'context/auth.md'). " +
-      "Searches the current session first, then other sessions for the same project. " +
+      "Searches current session first, then other sessions in project-local and legacy artifact stores. " +
       "Use this to read artifacts written by sub-agents or previous sessions.",
     promptSnippet:
       "Read a session-scoped artifact file by name (e.g. 'plans/my-plan.md', 'context/auth.md'). " +
-      "Searches the current session first, then other sessions for the same project. " +
+      "Searches current session first, then other sessions in project-local and legacy artifact stores. " +
       "Use this to read artifacts written by sub-agents or previous sessions.",
     promptGuidelines: [
       "Use read_artifact to read files written by write_artifact — especially artifacts from sub-agents.",
@@ -192,30 +218,41 @@ export default function (pi: ExtensionAPI) {
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const sessionDir = ctx.sessionManager.getSessionDir();
       const sessionId = ctx.sessionManager.getSessionId();
-      const projectArtifactsDir = join(sessionDir, "artifacts");
+      const cwd = ctx.cwd ?? process.cwd();
+      const projectArtifactsDirs = getArtifactSearchDirs(sessionDir, cwd);
 
-      const found = findArtifact(projectArtifactsDir, sessionId, params.name);
+      let found: string | null = null;
+      let foundRoot: string | null = null;
+      for (const projectArtifactsDir of projectArtifactsDirs) {
+        const candidate = findArtifact(projectArtifactsDir, sessionId, params.name);
+        if (!candidate) continue;
+        found = candidate;
+        foundRoot = projectArtifactsDir;
+        break;
+      }
 
-      if (!found) {
+      if (!found || !foundRoot) {
         // List available artifacts to help the agent
         const available: string[] = [];
-        if (existsSync(projectArtifactsDir)) {
-          const collectArtifacts = (dir: string, prefix: string) => {
-            try {
-              for (const entry of readdirSync(dir, { withFileTypes: true })) {
-                if (entry.isDirectory()) {
-                  collectArtifacts(
-                    join(dir, entry.name),
-                    prefix ? `${prefix}/${entry.name}` : entry.name,
-                  );
-                } else {
-                  available.push(prefix ? `${prefix}/${entry.name}` : entry.name);
-                }
+        const collectArtifacts = (dir: string, prefix: string) => {
+          try {
+            for (const entry of readdirSync(dir, { withFileTypes: true })) {
+              if (entry.isDirectory()) {
+                collectArtifacts(
+                  join(dir, entry.name),
+                  prefix ? `${prefix}/${entry.name}` : entry.name,
+                );
+              } else {
+                available.push(prefix ? `${prefix}/${entry.name}` : entry.name);
               }
-            } catch {}
-          };
-          for (const sessionDir of readdirSync(projectArtifactsDir)) {
-            const fullPath = join(projectArtifactsDir, sessionDir);
+            }
+          } catch {}
+        };
+
+        for (const projectArtifactsDir of projectArtifactsDirs) {
+          if (!existsSync(projectArtifactsDir)) continue;
+          for (const artifactSessionDir of readdirSync(projectArtifactsDir)) {
+            const fullPath = join(projectArtifactsDir, artifactSessionDir);
             try {
               if (statSync(fullPath).isDirectory()) {
                 collectArtifacts(fullPath, "");
@@ -237,7 +274,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       // Safety: ensure we're not escaping the artifacts directory
-      if (!found.startsWith(projectArtifactsDir)) {
+      if (!found.startsWith(foundRoot)) {
         throw new Error(`Path escapes artifact directory: ${params.name}`);
       }
 
