@@ -14,6 +14,7 @@ import {
   unlinkSync,
 } from "node:fs";
 import { homedir } from "node:os";
+import { execFileSync } from "node:child_process";
 import {
   isMuxAvailable,
   muxSetupHint,
@@ -391,7 +392,33 @@ function getShellReadyDelayMs(): number {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 500;
 }
 
-function muxUnavailableResult() {
+function getSessionTitleIssuePrefix(): string {
+  try {
+    const branch = execFileSync("git", ["branch", "--show-current"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+    }).trim();
+    const match = branch.match(/^(\d+)-/);
+    return match ? `#${match[1]}` : "xxxx";
+  } catch {
+    return "xxxx";
+  }
+}
+
+function prefixSessionTitle(title: string): string {
+  return `${getSessionTitleIssuePrefix()} ${title}`;
+}
+
+function muxUnavailableResult(kind: "subagents" | "tab-title" = "subagents") {
+  if (kind === "tab-title") {
+    return {
+      content: [
+        { type: "text" as const, text: `Terminal multiplexer not available. ${muxSetupHint()}` },
+      ],
+      details: { error: "mux not available" },
+    };
+  }
+
   return {
     content: [
       {
@@ -1632,7 +1659,43 @@ export default function subagentsExtension(pi: ExtensionAPI) {
       },
     });
 
+  // ── set_tab_title tool ──
+  if (shouldRegister("set_tab_title"))
+    pi.registerTool({
+      name: "set_tab_title",
+      label: "Set Tab Title",
+      description:
+        "Update the current tab/window and workspace/session title. Use to show progress during multi-phase workflows " +
+        "(e.g. planning, executing todos, reviewing). Keep titles short and informative.",
+      promptSnippet:
+        "Update the current tab/window and workspace/session title. Use to show progress during multi-phase workflows " +
+        "(e.g. planning, executing todos, reviewing). Keep titles short and informative.",
+      parameters: Type.Object({
+        title: Type.String({
+          description: "New tab title (also applied to workspace/session when supported)",
+        }),
+      }),
 
+      async execute(_toolCallId, params) {
+        if (!isMuxAvailable()) {
+          return muxUnavailableResult("tab-title");
+        }
+        try {
+          const prefixedTitle = prefixSessionTitle(params.title);
+          renameCurrentTab(prefixedTitle);
+          renameWorkspace(prefixedTitle);
+          return {
+            content: [{ type: "text", text: `Title set to: ${prefixedTitle}` }],
+            details: { title: prefixedTitle },
+          };
+        } catch (err: any) {
+          return {
+            content: [{ type: "text", text: `Failed to set title: ${err?.message}` }],
+            details: { error: err?.message },
+          };
+        }
+      },
+    });
 
   // ── subagent_resume tool ──
   if (shouldRegister("subagent_resume"))
