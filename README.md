@@ -68,13 +68,6 @@ Optional: set `PI_SUBAGENT_MUX=cmux|tmux|zellij|wezterm` to force a specific bac
 | `/iterate`                 | Fork into a subagent for quick fixes |
 | `/subagent <agent> <task>` | Spawn a named agent directly         |
 
-**Session Artifacts** — 2 tools for session-scoped file storage:
-
-| Tool             | Description                                               |
-| ---------------- | --------------------------------------------------------- |
-| `write_artifact` | Write plans, context, notes to a session-scoped directory |
-| `read_artifact`  | Read artifacts from current or previous sessions          |
-
 ### Bundled Agents
 
 | Agent             | Model                  | Role                                                                                     |

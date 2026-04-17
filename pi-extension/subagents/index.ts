@@ -303,8 +303,9 @@ function muxUnavailableResult() {
 }
 
 /**
- * Build the artifact directory path for the current session.
- * Same convention as the write_artifact tool:
+ * Build the internal artifact directory path for the current session.
+ * Used by the subagents extension to stash task files, system prompts, and
+ * launch scripts for sub-agents. Path convention:
  *   <sessionDir>/artifacts/<session-id>/
  */
 function getArtifactDir(sessionDir: string, sessionId: string): string {
